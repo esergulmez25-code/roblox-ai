@@ -1,0 +1,11 @@
+{
+  "name": "ZylinderParkour600",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "ZylinderParkour": {
+        "$path": "ZylinderParkour.server.lua"
+      }
+    }
+  }
+}
