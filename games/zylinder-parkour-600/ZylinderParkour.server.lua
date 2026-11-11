@@ -2,13 +2,15 @@
 	ZYLINDER-PARKOUR · 600 LEVEL
 	============================
 
-	Ein komplettes Obby in einem riesigen Glas-Zylinder. Die Strecke windet
-	sich als Spirale an der Innenseite nach oben: 600 Level, 12 Welten mit je
-	50 Leveln, steigender Schwierigkeit und 7 Hindernis-Arten.
+	Ein schweres Obby mit 600 Leveln in 12 Welten. Jede Welt ist ein eigener
+	Zylinder mit eigenen Wänden (Hecke, Sandstein, Lava-Gestein, Eis, Holz,
+	Zuckerstange, Neon ...). Die Strecke windet sich als Spirale an der
+	Innenseite nach oben. Oben in jeder Welt wartet ein PORTAL, das dich in
+	die nächste Welt bringt. Schon Level 1 ist kein Spaziergang.
 
 	Einbau: Diesen Script in ServerScriptService legen (als normales "Script")
-	und auf Play drücken. Alles andere (Zylinder, Level, Checkpoints, GUI,
-	Speichern) baut der Script beim Start selbst.
+	und auf Spielen drücken. Alles andere (Welten, Level, Checkpoints, Portale,
+	GUI, Speichern) baut der Script beim Start selbst.
 
 	Chat-Befehle:
 	  /neustart       – zurück zu Level 0 (Lobby)
@@ -21,53 +23,76 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local DataStoreService = game:GetService("DataStoreService")
 local TextChatService = game:GetService("TextChatService")
+local Lighting = game:GetService("Lighting")
 
 -------------------------------------------------------------------------------
 -- EINSTELLUNGEN
 -------------------------------------------------------------------------------
 local CONFIG = {
 	LEVELS = 600, -- Anzahl Level
-	LEVELS_PER_WORLD = 50, -- alle 50 Level eine neue Welt
+	LEVELS_PER_WORLD = 50, -- alle 50 Level eine neue Welt (neuer Zylinder)
 	SEED = 600, -- gleicher Seed = gleiche Strecke bei jedem Start
 
 	PATH_RADIUS = 40, -- Radius, auf dem die Strecke läuft
 	PILLAR_RADIUS = 14, -- Mittelsäule
-	WALL_RADIUS = 62, -- Glaswand des Zylinders
+	WALL_RADIUS = 62, -- Wand des Zylinders
 	WALL_SEGMENTS = 48, -- Anzahl Wandplatten im Kreis
+	WORLD_SPACING = 400, -- Abstand zwischen den Welt-Zylindern
 
 	SLOPE = 0.1, -- Höhe pro Stud Strecke -> ca. 25 Studs Abstand pro Runde
 	FALL_LIMIT = 12, -- so tief gefallen (seit höchstem Punkt) -> zurück zum Checkpoint
 	ACTIVE_RANGE = 2, -- Hindernisse werden nur um Spieler herum animiert
 
+	-- Schwierigkeit (0 = leicht, 1 = maximal). Startet schon bei START_DIFF.
+	START_DIFF = 0.35,
+	MAX_GAP = 6.2, -- größte Lücke (mehr schafft man mit normalem Sprung kaum)
+	MIN_SIZE = 3, -- kleinste Plattform
+
 	RESPAWN_TIME = 1,
 	DATASTORE_NAME = "ZylinderParkour600_v1",
 }
 
--- 12 Welten à 50 Level
+-- 12 Welten à 50 Level. wall = Material der Zylinderwand, wall2 = zweite
+-- Farbe für Streifen (jede zweite Platte).
+local M = Enum.Material
 local WORLDS = {
-	{ name = "Grasland", main = Color3.fromRGB(106, 190, 48), accent = Color3.fromRGB(255, 255, 255) },
-	{ name = "Wüste", main = Color3.fromRGB(226, 190, 112), accent = Color3.fromRGB(196, 120, 52) },
-	{ name = "Ozean", main = Color3.fromRGB(40, 140, 220), accent = Color3.fromRGB(150, 230, 255) },
-	{ name = "Vulkan", main = Color3.fromRGB(90, 60, 55), accent = Color3.fromRGB(255, 120, 30) },
-	{ name = "Eiswelt", main = Color3.fromRGB(190, 230, 255), accent = Color3.fromRGB(90, 160, 230) },
-	{ name = "Dschungel", main = Color3.fromRGB(40, 110, 60), accent = Color3.fromRGB(240, 210, 60) },
-	{ name = "Süßigkeiten", main = Color3.fromRGB(255, 150, 200), accent = Color3.fromRGB(130, 220, 255) },
-	{ name = "Neon-Stadt", main = Color3.fromRGB(40, 30, 70), accent = Color3.fromRGB(0, 255, 220) },
-	{ name = "Weltall", main = Color3.fromRGB(30, 30, 50), accent = Color3.fromRGB(180, 120, 255) },
-	{ name = "Giftsumpf", main = Color3.fromRGB(70, 90, 40), accent = Color3.fromRGB(170, 255, 0) },
-	{ name = "Goldtempel", main = Color3.fromRGB(240, 190, 50), accent = Color3.fromRGB(255, 250, 200) },
-	{ name = "Regenbogen", main = Color3.fromRGB(255, 255, 255), accent = Color3.fromRGB(255, 80, 80) },
+	{ name = "Grasland", main = Color3.fromRGB(106, 190, 48), accent = Color3.fromRGB(255, 255, 255),
+		wallMat = M.LeafyGrass, wall = Color3.fromRGB(60, 130, 40), wall2 = Color3.fromRGB(50, 115, 35), pillarMat = M.Brick },
+	{ name = "Wüste", main = Color3.fromRGB(226, 190, 112), accent = Color3.fromRGB(196, 120, 52),
+		wallMat = M.Sandstone, wall = Color3.fromRGB(215, 175, 110), wall2 = Color3.fromRGB(195, 150, 90), pillarMat = M.Sandstone },
+	{ name = "Ozean", main = Color3.fromRGB(40, 140, 220), accent = Color3.fromRGB(150, 230, 255),
+		wallMat = M.Pebble, wall = Color3.fromRGB(30, 110, 140), wall2 = Color3.fromRGB(240, 220, 170), pillarMat = M.Pebble },
+	{ name = "Vulkan", main = Color3.fromRGB(90, 60, 55), accent = Color3.fromRGB(255, 120, 30),
+		wallMat = M.Basalt, wall = Color3.fromRGB(45, 35, 35), wall2 = Color3.fromRGB(60, 40, 35), pillarMat = M.CrackedLava },
+	{ name = "Eiswelt", main = Color3.fromRGB(190, 230, 255), accent = Color3.fromRGB(90, 160, 230),
+		wallMat = M.Ice, wall = Color3.fromRGB(170, 215, 245), wall2 = Color3.fromRGB(200, 235, 255), pillarMat = M.Glacier },
+	{ name = "Dschungel", main = Color3.fromRGB(40, 110, 60), accent = Color3.fromRGB(240, 210, 60),
+		wallMat = M.Wood, wall = Color3.fromRGB(105, 70, 40), wall2 = Color3.fromRGB(85, 55, 30), pillarMat = M.Wood },
+	{ name = "Süßigkeiten", main = Color3.fromRGB(255, 150, 200), accent = Color3.fromRGB(130, 220, 255),
+		wallMat = M.SmoothPlastic, wall = Color3.fromRGB(255, 80, 110), wall2 = Color3.fromRGB(255, 255, 255), pillarMat = M.SmoothPlastic },
+	{ name = "Neon-Stadt", main = Color3.fromRGB(40, 30, 70), accent = Color3.fromRGB(0, 255, 220),
+		wallMat = M.Metal, wall = Color3.fromRGB(25, 25, 35), wall2 = Color3.fromRGB(0, 200, 255), wall2Mat = M.Neon, pillarMat = M.DiamondPlate },
+	{ name = "Weltall", main = Color3.fromRGB(30, 30, 50), accent = Color3.fromRGB(180, 120, 255),
+		wallMat = M.Slate, wall = Color3.fromRGB(15, 12, 30), wall2 = Color3.fromRGB(35, 20, 60), pillarMat = M.Foil },
+	{ name = "Giftsumpf", main = Color3.fromRGB(70, 90, 40), accent = Color3.fromRGB(170, 255, 0),
+		wallMat = M.Mud, wall = Color3.fromRGB(60, 70, 35), wall2 = Color3.fromRGB(45, 55, 25), pillarMat = M.Mud },
+	{ name = "Goldtempel", main = Color3.fromRGB(240, 190, 50), accent = Color3.fromRGB(255, 250, 200),
+		wallMat = M.Marble, wall = Color3.fromRGB(240, 235, 220), wall2 = Color3.fromRGB(230, 180, 40), wall2Mat = M.Foil, pillarMat = M.Marble },
+	{ name = "Regenbogen", main = Color3.fromRGB(255, 255, 255), accent = Color3.fromRGB(255, 80, 80),
+		wallMat = M.SmoothPlastic, rainbowWall = true, pillarMat = M.Neon },
 }
 
--- Hindernis-Arten und ab welchem Level sie vorkommen
+-- Hindernis-Arten und ab welchem Level sie vorkommen.
+-- "Mix" mischt in einem Level alle schon freigeschalteten Arten.
 local OBSTACLES = {
 	{ id = "Sprung", from = 1 },
-	{ id = "Lava", from = 8 },
-	{ id = "Verschwinden", from = 20 },
-	{ id = "Mini", from = 35 },
-	{ id = "Bewegt", from = 50 },
-	{ id = "Förderband", from = 80 },
-	{ id = "Spinner", from = 120 },
+	{ id = "Lava", from = 3 },
+	{ id = "Verschwinden", from = 8 },
+	{ id = "Mini", from = 14 },
+	{ id = "Bewegt", from = 20 },
+	{ id = "Förderband", from = 30 },
+	{ id = "Spinner", from = 40 },
+	{ id = "Mix", from = 100 },
 }
 
 local LAVA_COLOR = Color3.fromRGB(255, 60, 30)
@@ -95,20 +120,27 @@ local function newPart(props, parent)
 	return p
 end
 
--- CFrame auf der Spirale: -Z zeigt in Laufrichtung, X zeigt nach außen.
-local function pathCFrame(angle, y, radialOffset)
-	local r = CONFIG.PATH_RADIUS + (radialOffset or 0)
-	local pos = Vector3.new(math.cos(angle) * r, y, math.sin(angle) * r)
-	local tangent = Vector3.new(-math.sin(angle), 0, math.cos(angle))
-	return CFrame.lookAt(pos, pos + tangent)
-end
-
 local function worldIndex(level)
 	return math.clamp(math.ceil(level / CONFIG.LEVELS_PER_WORLD), 1, #WORLDS)
 end
 
-local function rainbow(level)
-	return Color3.fromHSV((level * 0.07) % 1, 0.75, 1)
+local function worldCenter(w)
+	return Vector3.new((w - 1) * CONFIG.WORLD_SPACING, 0, 0)
+end
+
+local currentCenter = worldCenter(1)
+
+-- CFrame auf der Spirale der aktuellen Welt: -Z zeigt in Laufrichtung,
+-- X zeigt nach außen.
+local function pathCFrame(angle, y, radialOffset)
+	local r = CONFIG.PATH_RADIUS + (radialOffset or 0)
+	local pos = currentCenter + Vector3.new(math.cos(angle) * r, y, math.sin(angle) * r)
+	local tangent = Vector3.new(-math.sin(angle), 0, math.cos(angle))
+	return CFrame.lookAt(pos, pos + tangent)
+end
+
+local function rainbow(n)
+	return Color3.fromHSV((n * 0.07) % 1, 0.75, 1)
 end
 
 local function getHumanoid(hit)
@@ -156,8 +188,8 @@ end
 
 -------------------------------------------------------------------------------
 -- HINDERNIS-BAUSTEINE
--- Jeder Baustein bekommt: cf (Mitte, Laufrichtung -Z), ctx (Level-Infos)
--- Länge in Laufrichtung wird vorher über ELEMENT_LENGTH bestimmt.
+-- Jeder Baustein bekommt: cf (Mitte, Laufrichtung -Z), ctx (Level-Infos),
+-- len (Länge in Laufrichtung, vorher über ELEMENT_LENGTH bestimmt).
 -------------------------------------------------------------------------------
 local function platformColor(ctx)
 	if ctx.world == #WORLDS then
@@ -168,17 +200,17 @@ end
 
 local ELEMENT_LENGTH = {
 	Sprung = function(ctx) return ctx.size end,
-	Mini = function(ctx) return ctx.size * 0.6 end,
+	Mini = function(ctx) return math.max(2, ctx.size * 0.6) end,
 	Verschwinden = function(ctx) return ctx.size end,
 	Bewegt = function(ctx) return ctx.size end,
 	Lava = function(ctx) return ctx.size * 2 + 3 end,
-	["Förderband"] = function(ctx) return ctx.size * 2 + 2 end,
+	["Förderband"] = function(ctx) return ctx.size * 2 + 3 end,
 	Spinner = function(ctx) return ctx.size + 3 end,
 }
 
--- Zusätzlicher Abstand-Abzug, damit schwere Arten fair bleiben
+-- Abzug von der Lücke, damit die fiesen Arten noch schaffbar bleiben
 local GAP_BONUS = {
-	Sprung = 0, Mini = -0.5, Verschwinden = 0, Bewegt = -1,
+	Sprung = 0, Mini = -0.5, Verschwinden = 0, Bewegt = -1.2,
 	Lava = -0.5, ["Förderband"] = -1, Spinner = -1,
 }
 
@@ -212,7 +244,7 @@ function BUILD.Verschwinden(cf, ctx, len)
 		Material = Enum.Material.Neon,
 		Transparency = 0.15,
 	}, ctx.folder)
-	local delayTime = 0.7 - 0.35 * ctx.diff
+	local delayTime = math.max(0.3, 0.6 - 0.3 * ctx.diff)
 	local busy = false
 	p.Touched:Connect(function(hit)
 		if busy or not getHumanoid(hit) then
@@ -239,8 +271,8 @@ function BUILD.Bewegt(cf, ctx, len)
 	}, ctx.folder)
 	-- Bewegt sich nach innen/außen (lokale X-Achse), damit der Abstand fair bleibt
 	local axis = cf.RightVector
-	local amp = 2 + 3 * ctx.diff
-	local speed = 1.2 + 1.3 * ctx.diff
+	local amp = 2.5 + 3 * ctx.diff
+	local speed = 1.5 + 1.5 * ctx.diff
 	local phase = rng:NextNumber(0, TAU)
 	addAnim(ctx.level, {
 		step = function(t)
@@ -263,7 +295,7 @@ function BUILD.Lava(cf, ctx, len)
 		CFrame = cf,
 		Color = platformColor(ctx),
 	}, ctx.folder)
-	local width = 1.5 + 2.5 * ctx.diff
+	local width = 2 + 2.5 * ctx.diff
 	local lava = newPart({
 		Name = "Lava",
 		Size = Vector3.new(ctx.size + 0.2, 0.3, width),
@@ -283,7 +315,7 @@ BUILD["Förderband"] = function(cf, ctx, len)
 		Material = Enum.Material.DiamondPlate,
 	}, ctx.folder)
 	-- Schiebt rückwärts (gegen die Laufrichtung). Läuft immer, kostet nichts.
-	local speed = 6 + 6 * ctx.diff
+	local speed = 7 + 5 * ctx.diff
 	p.AssemblyLinearVelocity = -cf.LookVector * speed
 	addLabel(p, "<<<", Enum.NormalId.Top, Color3.fromRGB(255, 220, 0))
 end
@@ -297,20 +329,27 @@ function BUILD.Spinner(cf, ctx, len)
 	}, ctx.folder)
 	local barLen = math.max(ctx.size + 3, len) + 1
 	local center = cf * CFrame.new(0, 1.6, 0)
-	local bar = newPart({
-		Name = "Spinner",
-		Size = Vector3.new(barLen, 0.8, 0.8),
-		CFrame = center,
-		Color = LAVA_COLOR,
-		Material = Enum.Material.Neon,
-		CanQuery = false,
-	}, ctx.folder)
-	makeKill(bar)
-	local speed = 1.5 + 2 * ctx.diff
+	local bars = {}
+	-- Ab mittlerer Schwierigkeit: Kreuz aus zwei Balken
+	for i = 1, (ctx.diff > 0.7 and 2 or 1) do
+		local bar = newPart({
+			Name = "Spinner",
+			Size = Vector3.new(barLen, 0.8, 0.8),
+			CFrame = center,
+			Color = LAVA_COLOR,
+			Material = Enum.Material.Neon,
+			CanQuery = false,
+		}, ctx.folder)
+		makeKill(bar)
+		bars[i] = bar
+	end
+	local speed = 2 + 2.5 * ctx.diff
 	local phase = rng:NextNumber(0, TAU)
 	addAnim(ctx.level, {
 		step = function(t)
-			bar.CFrame = center * CFrame.Angles(0, t * speed + phase, 0)
+			for i, bar in ipairs(bars) do
+				bar.CFrame = center * CFrame.Angles(0, t * speed + phase + (i - 1) * math.pi / 2, 0)
+			end
 		end,
 		stop = function() end,
 	})
@@ -319,7 +358,7 @@ end
 -------------------------------------------------------------------------------
 -- STRECKE GENERIEREN
 -------------------------------------------------------------------------------
-local checkpoints = {} -- [level] = Part
+local checkpoints = {} -- [level] = Part (601 = Ziel)
 local checkpointsFolder = Instance.new("Folder")
 checkpointsFolder.Name = "Checkpoints"
 checkpointsFolder.Parent = root
@@ -328,14 +367,13 @@ local levelsFolder = Instance.new("Folder")
 levelsFolder.Name = "Level"
 levelsFolder.Parent = root
 
-local CHECKPOINT_SIZE = 10
+local CHECKPOINT_SIZE = 8
 local START_ANGLE = 0
 local FLOOR_Y = 0
 
 local angle = START_ANGLE
-local pathY = FLOOR_Y + 0.5 -- Oberkante Checkpoint 1 liegt fast auf dem Boden
+local pathY = FLOOR_Y + 0.5
 local prevHalf = 0
-local worldStartY = { [1] = FLOOR_Y }
 
 -- Bewegt den "Stift" entlang der Spirale weiter
 local function advance(dist)
@@ -344,45 +382,82 @@ local function advance(dist)
 end
 
 local onCheckpointTouched -- wird weiter unten gesetzt
+local buildCylinder -- wird weiter unten gesetzt
 
-local function buildCheckpoint(level, isFinish)
+local function buildCheckpoint(level, kind)
+	-- kind: nil = normaler Checkpoint, "portal" = Portal in die nächste Welt,
+	-- "finish" = Ziel ganz oben in der letzten Welt
 	local w = worldIndex(math.min(level, CONFIG.LEVELS))
 	local colors = WORLDS[w]
-	local size = isFinish and 16 or CHECKPOINT_SIZE
+	local size = kind and 14 or CHECKPOINT_SIZE
 	local cf = pathCFrame(angle, pathY)
 	local pad = newPart({
-		Name = isFinish and "Ziel" or ("Checkpoint" .. level),
+		Name = kind == "finish" and "Ziel" or kind == "portal" and ("Portal_Welt" .. w) or ("Checkpoint" .. level),
 		Size = Vector3.new(size, 1, size),
 		CFrame = cf,
-		Color = isFinish and Color3.fromRGB(255, 215, 0) or colors.accent,
+		Color = kind == "finish" and Color3.fromRGB(255, 215, 0) or colors.accent,
 		Material = Enum.Material.Neon,
 	}, checkpointsFolder)
 	pad:SetAttribute("Level", level)
 
-	if isFinish then
+	local touchParts = { pad }
+	if kind == "finish" then
 		addLabel(pad, "🏆 ZIEL 🏆", Enum.NormalId.Top, Color3.fromRGB(80, 50, 0))
+	elseif kind == "portal" then
+		local nextWorld = WORLDS[w + 1]
+		local portal = newPart({
+			Name = "Portal",
+			Size = Vector3.new(10, 12, 1),
+			CFrame = cf * CFrame.new(0, 6.5, -3), -- steht quer zur Laufrichtung
+			Color = nextWorld.accent,
+			Material = Enum.Material.ForceField,
+			CanCollide = false,
+		}, checkpointsFolder)
+		addLabel(portal, "Welt " .. (w + 1) .. "\n" .. nextWorld.name, Enum.NormalId.Front, Color3.new(1, 1, 1))
+		addLabel(portal, "Welt " .. (w + 1) .. "\n" .. nextWorld.name, Enum.NormalId.Back, Color3.new(1, 1, 1))
+		addLabel(pad, "PORTAL ➜", Enum.NormalId.Top, Color3.new(0, 0, 0))
+		table.insert(touchParts, portal)
 	elseif level % CONFIG.LEVELS_PER_WORLD == 1 then
 		addLabel(pad, "Welt " .. w .. "\n" .. colors.name, Enum.NormalId.Top, Color3.new(0, 0, 0))
 	else
 		addLabel(pad, tostring(level), Enum.NormalId.Top, Color3.new(0, 0, 0))
 	end
 
-	pad.Touched:Connect(function(hit)
-		onCheckpointTouched(pad, level, isFinish, hit)
-	end)
-	checkpoints[level] = pad
+	local light = Instance.new("PointLight")
+	light.Range = 24
+	light.Brightness = 1.2
+	light.Color = pad.Color
+	light.Parent = pad
+
+	for _, part in ipairs(touchParts) do
+		part.Touched:Connect(function(hit)
+			onCheckpointTouched(pad, level, kind, hit)
+		end)
+	end
+	if kind ~= "portal" then
+		checkpoints[level] = pad
+	end
 	return pad
 end
 
-local function pickObstacle(level, last)
-	if level % CONFIG.LEVELS_PER_WORLD == 0 then
-		return "Sprung" -- letztes Level jeder Welt: Verschnaufpause
-	end
+local function unlocked(level)
 	local pool = {}
 	for _, o in ipairs(OBSTACLES) do
-		if level >= o.from then
+		if level >= o.from and o.id ~= "Mix" then
 			table.insert(pool, o.id)
 		end
+	end
+	return pool
+end
+
+local function pickObstacle(level, last)
+	if level % CONFIG.LEVELS_PER_WORLD == 0 and level >= 50 then
+		return "Mix" -- letztes Level jeder Welt: Endgegner-Level mit allem
+	end
+	local pool = unlocked(level)
+	if level >= 100 then
+		table.insert(pool, "Mix")
+		table.insert(pool, "Mix")
 	end
 	local choice = pool[rng:NextInteger(1, #pool)]
 	if choice == last and #pool > 1 then
@@ -391,24 +466,31 @@ local function pickObstacle(level, last)
 	return choice
 end
 
+local function difficulty(level)
+	local global = (level - 1) / math.max(CONFIG.LEVELS - 1, 1)
+	local inWorld = ((level - 1) % CONFIG.LEVELS_PER_WORLD) / (CONFIG.LEVELS_PER_WORLD - 1)
+	local d = CONFIG.START_DIFF + (1 - CONFIG.START_DIFF) * (0.75 * global + 0.25 * inWorld)
+	return math.clamp(d, 0, 1)
+end
+
 local function generate()
 	local lastType = nil
 	for level = 1, CONFIG.LEVELS do
-		-- Checkpoint am Anfang des Levels
-		if level > 1 then
+		local w = worldIndex(level)
+		local worldStart = (level - 1) % CONFIG.LEVELS_PER_WORLD == 0
+
+		if worldStart then
+			-- Neue Welt = neuer Zylinder, Strecke beginnt wieder unten
+			currentCenter = worldCenter(w)
+			angle = START_ANGLE
+			pathY = FLOOR_Y + 0.5
+		else
 			advance(prevHalf + 3 + CHECKPOINT_SIZE / 2)
 		end
-		if level % CONFIG.LEVELS_PER_WORLD == 1 then
-			worldStartY[worldIndex(level)] = pathY - 2
-		end
-		buildCheckpoint(level, false)
+		buildCheckpoint(level, nil)
 		prevHalf = CHECKPOINT_SIZE / 2
 
-		-- Schwierigkeit: steigt über 600 Level und zusätzlich in jeder Welt
-		local global = (level - 1) / math.max(CONFIG.LEVELS - 1, 1)
-		local inWorld = ((level - 1) % CONFIG.LEVELS_PER_WORLD) / (CONFIG.LEVELS_PER_WORLD - 1)
-		local diff = math.clamp(0.8 * global + 0.2 * inWorld, 0, 1)
-
+		local diff = difficulty(level)
 		local kind = pickObstacle(level, lastType)
 		lastType = kind
 
@@ -416,124 +498,133 @@ local function generate()
 		folder.Name = string.format("Level%03d_%s", level, kind)
 		folder.Parent = levelsFolder
 
-		local w = worldIndex(level)
 		local ctx = {
 			level = level,
 			world = w,
 			colors = WORLDS[w],
 			diff = diff,
-			size = 6 - 2.5 * diff, -- Plattformen werden kleiner
+			size = math.max(CONFIG.MIN_SIZE, 5.5 - 3 * diff), -- Plattformen werden kleiner
 			folder = folder,
 			index = 0,
 		}
-		local gap = math.max(2, 2 + 4 * diff + GAP_BONUS[kind]) -- Lücken werden größer
-		local count = 3 + math.floor(diff * 3) -- 3 bis 6 Sprünge pro Level
+		local count = 4 + math.floor(diff * 4) -- 5 bis 8 Sprünge pro Level
+		local pool = unlocked(level)
 
 		for i = 1, count do
 			ctx.index = i
-			local len = ELEMENT_LENGTH[kind](ctx)
+			local k = kind == "Mix" and pool[rng:NextInteger(1, #pool)] or kind
+			local gap = math.clamp(2.5 + 4.5 * diff + GAP_BONUS[k], 2, CONFIG.MAX_GAP)
+			local len = ELEMENT_LENGTH[k](ctx)
 			advance(prevHalf + gap + len / 2)
-			local jitter = rng:NextNumber(-1.5, 1.5) * diff
-			BUILD[kind](pathCFrame(angle, pathY, jitter), ctx, len)
+			local jitter = rng:NextNumber(-1, 1) * diff
+			BUILD[k](pathCFrame(angle, pathY, jitter), ctx, len)
 			prevHalf = len / 2
+		end
+
+		-- Ende der Welt: Portal (oder Ziel in der letzten Welt) + Zylinder drumherum
+		if level % CONFIG.LEVELS_PER_WORLD == 0 or level == CONFIG.LEVELS then
+			advance(prevHalf + 3 + 7)
+			local last = level == CONFIG.LEVELS
+			buildCheckpoint(last and CONFIG.LEVELS + 1 or level, last and "finish" or "portal")
+			buildCylinder(w, currentCenter, pathY + 30)
 		end
 
 		if level % 10 == 0 then
 			task.wait() -- Server nicht einfrieren lassen
 		end
 	end
-
-	-- Ziel
-	advance(prevHalf + 3 + 8)
-	buildCheckpoint(CONFIG.LEVELS + 1, true)
 end
 
 -------------------------------------------------------------------------------
--- ZYLINDER BAUEN (Boden, Säule, Glaswand, Deckel)
+-- ZYLINDER BAUEN (Boden, Säule, Wand, Deckel) – jede Welt anders
 -------------------------------------------------------------------------------
-local function verticalCylinder(name, radius, bottomY, topY, color, material, transparency, parent)
+local function verticalCylinder(name, center, radius, bottomY, topY, props, parent)
 	local height = topY - bottomY
-	return newPart({
-		Name = name,
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(height, radius * 2, radius * 2),
-		CFrame = CFrame.new(0, bottomY + height / 2, 0) * CFrame.Angles(0, 0, math.pi / 2),
-		Color = color,
-		Material = material or Enum.Material.SmoothPlastic,
-		Transparency = transparency or 0,
-	}, parent)
+	props.Name = name
+	props.Shape = Enum.PartType.Cylinder
+	props.Size = Vector3.new(height, radius * 2, radius * 2)
+	props.CFrame = CFrame.new(center + Vector3.new(0, bottomY + height / 2, 0)) * CFrame.Angles(0, 0, math.pi / 2)
+	return newPart(props, parent)
 end
 
-local function buildCylinder(topY)
+buildCylinder = function(w, center, topY)
+	local theme = WORLDS[w]
 	local folder = Instance.new("Folder")
-	folder.Name = "Zylinder"
+	folder.Name = "Welt" .. w .. "_" .. theme.name
 	folder.Parent = root
 
-	-- Boden + Lava-Rand ist nicht nötig: unten ist die Lobby
-	verticalCylinder("Boden", CONFIG.WALL_RADIUS + 2, FLOOR_Y - 2, FLOOR_Y, Color3.fromRGB(90, 90, 100),
-		Enum.Material.Slate, 0, folder)
+	verticalCylinder("Boden", center, CONFIG.WALL_RADIUS + 2, FLOOR_Y - 2, FLOOR_Y, {
+		Color = theme.wall2 or theme.main, Material = theme.wallMat,
+	}, folder)
 
-	-- Mittelsäule, pro Welt eingefärbt
-	for w = 1, #WORLDS do
-		local bottom = worldStartY[w] or FLOOR_Y
-		local top = worldStartY[w + 1] or topY
-		if top > bottom then
-			local col = WORLDS[w].main:Lerp(Color3.new(0, 0, 0), 0.25)
-			local y = bottom
-			while y < top do -- Parts dürfen max. 2048 lang sein
-				local seg = math.min(top - y, 2000)
-				verticalCylinder("Säule_Welt" .. w, CONFIG.PILLAR_RADIUS, y, y + seg, col,
-					Enum.Material.Concrete, 0, folder)
-				y += seg
-			end
-		end
+	-- Mittelsäule (Parts dürfen max. 2048 lang sein)
+	local y = FLOOR_Y
+	while y < topY do
+		local seg = math.min(topY - y, 2000)
+		verticalCylinder("Säule", center, CONFIG.PILLAR_RADIUS, y, y + seg, {
+			Color = theme.main:Lerp(Color3.new(0, 0, 0), 0.25), Material = theme.pillarMat, CastShadow = false,
+		}, folder)
+		y += seg
 	end
 
-	-- Glaswand aus Platten
+	-- Wand aus Platten, abwechselnd in zwei Farben (Streifen)
 	local panelWidth = TAU * CONFIG.WALL_RADIUS / CONFIG.WALL_SEGMENTS + 0.6
-	local y = FLOOR_Y
+	y = FLOOR_Y
 	while y < topY do
 		local seg = math.min(topY - y, 2000)
 		for i = 0, CONFIG.WALL_SEGMENTS - 1 do
 			local a = i / CONFIG.WALL_SEGMENTS * TAU
-			local pos = Vector3.new(math.cos(a) * CONFIG.WALL_RADIUS, y + seg / 2, math.sin(a) * CONFIG.WALL_RADIUS)
+			local pos = center + Vector3.new(math.cos(a) * CONFIG.WALL_RADIUS, y + seg / 2, math.sin(a) * CONFIG.WALL_RADIUS)
 			local tangent = Vector3.new(-math.sin(a), 0, math.cos(a))
+			local even = i % 2 == 0
+			local color, mat
+			if theme.rainbowWall then
+				color, mat = Color3.fromHSV(i / CONFIG.WALL_SEGMENTS, 0.7, 1), theme.wallMat
+			else
+				color = even and theme.wall or theme.wall2
+				mat = (not even and theme.wall2Mat) or theme.wallMat
+			end
 			newPart({
 				Name = "Wand",
-				Size = Vector3.new(1, seg, panelWidth),
+				Size = Vector3.new(2, seg, panelWidth),
 				CFrame = CFrame.lookAt(pos, pos + tangent),
-				Color = Color3.fromRGB(170, 220, 255),
-				Material = Enum.Material.Glass,
-				Transparency = 0.6,
-				CastShadow = false,
+				Color = color,
+				Material = mat,
+				CastShadow = false, -- damit es innen nicht stockdunkel ist
 			}, folder)
 		end
 		y += seg
 	end
 
-	-- Deckel
-	verticalCylinder("Deckel", CONFIG.WALL_RADIUS + 2, topY, topY + 2, Color3.fromRGB(255, 215, 0),
-		Enum.Material.Neon, 0.3, folder)
-
-	-- Lobby-Spawn auf dem Boden, kurz vor Checkpoint 1
-	local spawnCf = pathCFrame(START_ANGLE - 18 / CONFIG.PATH_RADIUS, FLOOR_Y + 0.5)
-	local spawn = Instance.new("SpawnLocation")
-	spawn.Name = "LobbySpawn"
-	spawn.Anchored = true
-	spawn.Size = Vector3.new(12, 1, 12)
-	spawn.CFrame = spawnCf
-	spawn.Color = Color3.fromRGB(255, 255, 255)
-	spawn.Material = Enum.Material.SmoothPlastic
-	spawn.Duration = 0
-	spawn.Parent = folder
-
-	local sign = newPart({
-		Name = "Schild",
-		Size = Vector3.new(14, 6, 0.5),
-		CFrame = spawnCf * CFrame.new(0, 6, 8),
-		Color = Color3.fromRGB(30, 30, 40),
+	-- Deckel (wirft keinen Schatten, Licht kommt trotzdem rein)
+	verticalCylinder("Deckel", center, CONFIG.WALL_RADIUS + 2, topY, topY + 2, {
+		Color = theme.accent, Material = Enum.Material.Neon, Transparency = 0.4, CastShadow = false,
 	}, folder)
-	addLabel(sign, "ZYLINDER-PARKOUR\n600 LEVEL ↑", Enum.NormalId.Front, Color3.fromRGB(255, 220, 0))
+
+	if w == 1 then
+		-- Lobby-Spawn auf dem Boden, kurz vor Checkpoint 1
+		local saved = currentCenter
+		currentCenter = center
+		local spawnCf = pathCFrame(START_ANGLE - 18 / CONFIG.PATH_RADIUS, FLOOR_Y + 0.5)
+		currentCenter = saved
+		local spawn = Instance.new("SpawnLocation")
+		spawn.Name = "LobbySpawn"
+		spawn.Anchored = true
+		spawn.Size = Vector3.new(12, 1, 12)
+		spawn.CFrame = spawnCf
+		spawn.Color = Color3.fromRGB(255, 255, 255)
+		spawn.Material = Enum.Material.SmoothPlastic
+		spawn.Duration = 0
+		spawn.Parent = folder
+
+		local sign = newPart({
+			Name = "Schild",
+			Size = Vector3.new(14, 6, 0.5),
+			CFrame = spawnCf * CFrame.new(0, 6, 8),
+			Color = Color3.fromRGB(30, 30, 40),
+		}, folder)
+		addLabel(sign, "ZYLINDER-PARKOUR\n600 LEVEL · 12 WELTEN", Enum.NormalId.Front, Color3.fromRGB(255, 220, 0))
+	end
 end
 
 -------------------------------------------------------------------------------
@@ -665,7 +756,7 @@ local function setStage(player, stage)
 	refresh(player)
 end
 
-onCheckpointTouched = function(pad, level, isFinish, hit)
+onCheckpointTouched = function(pad, level, kind, hit)
 	local hum = getHumanoid(hit)
 	if not hum or hum.Health <= 0 then
 		return
@@ -676,7 +767,19 @@ onCheckpointTouched = function(pad, level, isFinish, hit)
 	end
 	local stage = stageOf[player]
 
-	if isFinish then
+	if kind == "portal" then
+		-- Welt geschafft -> ab in die nächste Welt
+		if stage == level then
+			stageOf[player] = level + 1
+			refresh(player)
+			teleportToStage(player)
+			local w = worldIndex(level + 1)
+			showBanner(player, "🌀 Welt " .. w .. ": " .. WORLDS[w].name .. " 🌀", 3)
+		end
+		return
+	end
+
+	if kind == "finish" then
 		if stage == CONFIG.LEVELS and not player:GetAttribute("Finished") then
 			player:SetAttribute("Finished", true)
 			player.leaderstats.Siege.Value += 1
@@ -690,9 +793,7 @@ onCheckpointTouched = function(pad, level, isFinish, hit)
 		stageOf[player] = level
 		maxYOf[player] = nil
 		refresh(player)
-		if level % CONFIG.LEVELS_PER_WORLD == 1 then
-			showBanner(player, "Welt " .. worldIndex(level) .. ": " .. WORLDS[worldIndex(level)].name, 3)
-		elseif level % 100 == 0 then
+		if level % 100 == 0 then
 			showBanner(player, "Level " .. level .. "!", 2)
 		end
 		-- kleiner Effekt am Checkpoint
@@ -850,10 +951,13 @@ end
 Players.RespawnTime = CONFIG.RESPAWN_TIME
 
 local t0 = os.clock()
+-- Etwas helleres Umgebungslicht, damit es in den Zylindern nicht zu dunkel ist
+Lighting.Ambient = Color3.fromRGB(120, 120, 130)
+Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 160)
+
 generate()
-buildCylinder(pathY + 30)
-print(string.format("[ZylinderParkour] %d Level gebaut in %.1fs, Höhe %.0f Studs",
-	CONFIG.LEVELS, os.clock() - t0, pathY))
+print(string.format("[ZylinderParkour] %d Level in %d Welten gebaut (%.1fs)",
+	CONFIG.LEVELS, #WORLDS, os.clock() - t0))
 
 Players.PlayerAdded:Connect(onPlayerAdded)
 for _, p in ipairs(Players:GetPlayers()) do
